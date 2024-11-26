@@ -2,6 +2,12 @@
 
 A Flutter app POC that captures and processes images of checks to extract the MICR line, obtaining the cheque number, routing code, and account number.
 
+
+
+https://github.com/user-attachments/assets/390e2e1b-de8a-4f97-bfa4-7b8df7a511e7
+
+
+
 ## How It Works
 
 1. **Camera Capture**:
