@@ -39,6 +39,7 @@ class _MicroOcrAppState extends State<MicroOcrApp> {
   File? processedImageFile; // To display the processed image
   File? rotatedImageFile; // To display the rotated image
   bool isProcessing = false;
+  final double frameAspectRatio = 1.9; // height/width ratio for the frame
 
   @override
   void initState() {
@@ -248,63 +249,109 @@ class _MicroOcrAppState extends State<MicroOcrApp> {
 
   Future<String?> extractMicrData(img.Image capturedImage, {bool isRotated = false}) async {
     try {
-      // Now the image should be properly oriented.
+      print('Original image size: ${capturedImage.width}x${capturedImage.height}');
 
-      // Crop the bottom 30% of the image
-      int cropHeight = (capturedImage.height * 0.30).toInt();
-      int yOffset = capturedImage.height - cropHeight;
+      // STEP 1: Calculate frame dimensions using the same logic as in UI
+      double frameWidth = capturedImage.width * 0.9; // Start with 90% of width
+      double frameHeight = frameWidth * (1 / frameAspectRatio); // Инвертируем соотношение
+      
+      // Если высота слишком большая, пересчитываем от высоты
+      if (frameHeight > capturedImage.height * 0.9) {
+        frameHeight = capturedImage.height * 0.9;
+        frameWidth = frameHeight * frameAspectRatio;
+      }
+      
+      // Calculate center position
+      int frameX = ((capturedImage.width - frameWidth) / 2).round();
+      int frameY = ((capturedImage.height - frameHeight) / 2).round();
+      
+      print('Calculated frame crop parameters:');
+      print('frameWidth: $frameWidth, frameHeight: $frameHeight');
+      print('frameX: $frameX, frameY: $frameY');
 
-      img.Image croppedImage = img.copyCrop(
+      // Crop the frame area
+      img.Image framedImage = img.copyCrop(
         capturedImage,
-        x: 0,
-        y: yOffset,
-        width: capturedImage.width,
-        height: cropHeight,
+        x: frameX,
+        y: frameY,
+        width: frameWidth.round(),
+        height: frameHeight.round(),
       );
-      print('Image cropped: ${croppedImage.width}x${croppedImage.height}');
 
-      // Convert to grayscale
-      img.Image grayscaleImage = img.grayscale(croppedImage);
+      print('After frame crop size: ${framedImage.width}x${framedImage.height}');
 
-      // Enhance contrast
-      img.Image contrastEnhancedImage =
-      img.adjustColor(grayscaleImage, contrast: 1.5);
-
-      // Apply Gaussian blur to reduce noise
-      img.gaussianBlur(contrastEnhancedImage, radius: 1);
-
-      // Apply adaptive thresholding
-      adaptiveThreshold(contrastEnhancedImage, blockSize: 15, C: 10);
-
-      // Use the processed image for OCR
-      img.Image processedImage = contrastEnhancedImage;
-
-      // Save the processed image
+      // Debug save
       Directory tempDir = await getTemporaryDirectory();
-      String tempPath = path.join(
+      String framedDebugPath = path.join(
         tempDir.path,
-        'processed_image_${DateTime.now().millisecondsSinceEpoch}.png',
+        'framed_debug_${DateTime.now().millisecondsSinceEpoch}.png',
       );
-      File tempFile = File(tempPath);
-      await tempFile.writeAsBytes(img.encodePng(processedImage));
-      print('Processed image saved: $tempPath');
+      await File(framedDebugPath).writeAsBytes(img.encodePng(framedImage));
+      print('Saved debug framed image to: $framedDebugPath');
 
-      // Display the processed image
+      // Take bottom 30% of the framed image
+      int bottomCropHeight = (framedImage.height * 0.30).round();
+      int bottomCropY = framedImage.height - bottomCropHeight;
+
+      img.Image bottomCroppedImage = img.copyCrop(
+        framedImage,
+        x: 0,
+        y: bottomCropY,
+        width: framedImage.width,
+        height: bottomCropHeight,
+      );
+
+      print('After bottom crop size: ${bottomCroppedImage.width}x${bottomCroppedImage.height}');
+
+      // Process the bottom-cropped image
+      img.Image processedImage = img.grayscale(bottomCroppedImage);
+      processedImage = img.adjustColor(processedImage, contrast: 1.5);
+      img.gaussianBlur(processedImage, radius: 1);
+      adaptiveThreshold(processedImage, blockSize: 15, C: 10);
+
+      print('Final processed image size: ${processedImage.width}x${processedImage.height}');
+
+      // Save all intermediate images for debugging
+      // Save framed image
+      String framedPath = path.join(
+        tempDir.path,
+        'framed_${DateTime.now().millisecondsSinceEpoch}.png',
+      );
+      await File(framedPath).writeAsBytes(img.encodePng(framedImage));
+      print('Saved framed image to: $framedPath');
+
+      // Save bottom cropped image
+      String bottomCroppedPath = path.join(
+        tempDir.path,
+        'bottom_cropped_${DateTime.now().millisecondsSinceEpoch}.png',
+      );
+      await File(bottomCroppedPath).writeAsBytes(img.encodePng(bottomCroppedImage));
+      print('Saved bottom cropped image to: $bottomCroppedPath');
+
+      // Save final processed image
+      String processedPath = path.join(
+        tempDir.path,
+        'processed_${DateTime.now().millisecondsSinceEpoch}.png',
+      );
+      File processedFile = File(processedPath);
+      await processedFile.writeAsBytes(img.encodePng(processedImage));
+      print('Saved processed image to: $processedPath');
+
       setState(() {
-        processedImageFile = tempFile;
+        processedImageFile = processedFile;
       });
 
-      // Perform OCR
-      print('Starting OCR...');
+      // Perform OCR on the processed image
       String ocrText = await FlutterTesseractOcr.extractText(
-        tempPath,
+        processedPath,
         language: 'e13b',
         args: {
           'tessedit_char_whitelist': '0123456789ABCD',
         },
       );
-      print('OCR completed. Recognized Text: $ocrText');
 
+      print('OCR completed. Recognized Text: $ocrText');
+      
       print("OCR Text before cleaning:\n$ocrText");
 
       // Split the OCR text into lines
@@ -322,10 +369,8 @@ class _MicroOcrAppState extends State<MicroOcrApp> {
 
       // If not found, concatenate all lines and clean
       if (targetLine.isEmpty) {
-        String concatenatedCleanedText =
-        ocrText.replaceAll(RegExp(r'\D'), '');
+        String concatenatedCleanedText = ocrText.replaceAll(RegExp(r'\D'), '');
         if (concatenatedCleanedText.length >= 25) {
-          // Take the last 25 digits (assuming MICR line is at the end)
           targetLine = concatenatedCleanedText.substring(
               concatenatedCleanedText.length - 25);
         } else {
@@ -347,6 +392,7 @@ class _MicroOcrAppState extends State<MicroOcrApp> {
       }
 
       return result;
+
     } catch (e) {
       print('Error in extractMicrData: $e');
       return null;
@@ -373,9 +419,8 @@ class _MicroOcrAppState extends State<MicroOcrApp> {
                     return LayoutBuilder(
                       builder: (context, constraints) {
                         double overlayHeight =
-                            constraints.maxHeight * .9; // 90% of preview height
-                        double overlayWidth = overlayHeight /
-                            1.7; // Width based on aspect ratio
+                            constraints.maxHeight * 0.9; // 90% of preview height
+                        double overlayWidth = overlayHeight / frameAspectRatio;
                         double left =
                             (constraints.maxWidth - overlayWidth) / 2;
                         double top =
