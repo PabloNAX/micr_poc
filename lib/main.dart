@@ -46,7 +46,7 @@ class _MicroOcrAppState extends State<MicroOcrApp> {
     // Initialize the camera controller
     _controller = CameraController(
       widget.camera,
-      ResolutionPreset.high,
+      ResolutionPreset.medium,
     );
     _initializeControllerFuture = _controller.initialize();
 
@@ -119,52 +119,10 @@ class _MicroOcrAppState extends State<MicroOcrApp> {
       }
 
       // Process the image
-      String ocrText = await processImage(image);
+      String ocrResult = await processImage(image);
 
-      print("OCR Text before cleaning:\n$ocrText");
-
-      // Split the OCR text into lines
-      List<String> lines = ocrText.split('\n');
-
-      String targetLine = '';
-      // Iterate over each line to find the one with 25 digits after cleaning
-      for (String line in lines) {
-        String cleanedLine = line.replaceAll(RegExp(r'\D'), '');
-        if (cleanedLine.length == 25) {
-          targetLine = cleanedLine;
-          break;
-        }
-      }
-
-      // If not found, concatenate all lines and clean
-      if (targetLine.isEmpty) {
-        String concatenatedCleanedText =
-        ocrText.replaceAll(RegExp(r'\D'), '');
-        if (concatenatedCleanedText.length >= 25) {
-          // Take the last 25 digits (assuming MICR line is at the end)
-          targetLine = concatenatedCleanedText.substring(
-              concatenatedCleanedText.length - 25);
-        } else {
-          setState(() {
-            recognizedText =
-            'Error: Expected at least 25 digits, but found ${concatenatedCleanedText.length}.';
-            isProcessing = false;
-          });
-          return;
-        }
-      }
-
-      print("Cleaned MICR Line: $targetLine");
-
-      // Split the digits into the required parts
-      String chequeNo = targetLine.substring(0, 6);
-      String routingCode = targetLine.substring(6, 15);
-      String accountNo = targetLine.substring(15, 25);
-
-      // Update the recognizedText to display the results
       setState(() {
-        recognizedText =
-        'Cheque No: $chequeNo\nRouting Code: $routingCode\nAccount No: $accountNo';
+        recognizedText = ocrResult;
         isProcessing = false;
       });
     } catch (e) {
@@ -175,7 +133,6 @@ class _MicroOcrAppState extends State<MicroOcrApp> {
       });
     }
   }
-
 
   void adaptiveThreshold(img.Image image, {int blockSize = 15, double C = 10}) {
     int width = image.width;
@@ -222,18 +179,18 @@ class _MicroOcrAppState extends State<MicroOcrApp> {
       final bytes = await image.readAsBytes();
       print('Image bytes length: ${bytes.length}');
 
-      // Read EXIF data to get orientation
-      img.Image? capturedImage = img.decodeImage(bytes);
+      // Decode the image
+      img.Image? originalImage = img.decodeImage(bytes);
 
-      if (capturedImage == null) {
+      if (originalImage == null) {
         print('Error decoding image.');
         return 'Error decoding image';
       }
-      print('Image decoded: ${capturedImage.width}x${capturedImage.height}');
+      print('Image decoded: ${originalImage.width}x${originalImage.height}');
 
       // Rotate the image if it's in portrait orientation
-      if (capturedImage.width < capturedImage.height) {
-        capturedImage = img.copyRotate(capturedImage, angle: -90);
+      if (originalImage.width < originalImage.height) {
+        originalImage = img.copyRotate(originalImage, angle: -90);
         print('Rotated image by -90 degrees to make it landscape.');
       }
 
@@ -244,7 +201,7 @@ class _MicroOcrAppState extends State<MicroOcrApp> {
         'rotated_image_${DateTime.now().millisecondsSinceEpoch}.png',
       );
       File tempRotatedFile = File(tempRotatedPath);
-      await tempRotatedFile.writeAsBytes(img.encodePng(capturedImage));
+      await tempRotatedFile.writeAsBytes(img.encodePng(originalImage));
       print('Rotated image saved: $tempRotatedPath');
 
       // Display the rotated image
@@ -252,6 +209,45 @@ class _MicroOcrAppState extends State<MicroOcrApp> {
         rotatedImageFile = tempRotatedFile;
       });
 
+      // Try processing the image in original orientation
+      String? result = await extractMicrData(originalImage, isRotated: false);
+
+      if (result == null) {
+        // Rotate the image by 180 degrees and try again
+        img.Image rotated180Image = img.copyRotate(originalImage, angle: 180);
+        print('Rotated image by 180 degrees to handle upside-down check.');
+
+        // Save the 180-degree rotated image for debugging (optional)
+        String tempRotated180Path = path.join(
+          tempDir.path,
+          'rotated180_image_${DateTime.now().millisecondsSinceEpoch}.png',
+        );
+        File tempRotated180File = File(tempRotated180Path);
+        await tempRotated180File.writeAsBytes(img.encodePng(rotated180Image));
+        print('Rotated 180 image saved: $tempRotated180Path');
+
+        // Display the rotated 180 image (optional)
+        // setState(() {
+        //   rotatedImageFile = tempRotated180File;
+        // });
+
+        // Try processing the rotated image
+        result = await extractMicrData(rotated180Image, isRotated: true);
+
+        if (result == null) {
+          return 'Error: Unable to extract MICR data.';
+        }
+      }
+
+      return result;
+    } catch (e) {
+      print('Error in processImage: $e');
+      return 'Error during image processing: $e';
+    }
+  }
+
+  Future<String?> extractMicrData(img.Image capturedImage, {bool isRotated = false}) async {
+    try {
       // Now the image should be properly oriented.
 
       // Crop the bottom 30% of the image
@@ -284,6 +280,7 @@ class _MicroOcrAppState extends State<MicroOcrApp> {
       img.Image processedImage = contrastEnhancedImage;
 
       // Save the processed image
+      Directory tempDir = await getTemporaryDirectory();
       String tempPath = path.join(
         tempDir.path,
         'processed_image_${DateTime.now().millisecondsSinceEpoch}.png',
@@ -299,19 +296,60 @@ class _MicroOcrAppState extends State<MicroOcrApp> {
 
       // Perform OCR
       print('Starting OCR...');
-      String recognizedText = await FlutterTesseractOcr.extractText(
+      String ocrText = await FlutterTesseractOcr.extractText(
         tempPath,
         language: 'e13b',
         args: {
           'tessedit_char_whitelist': '0123456789ABCD',
         },
       );
-      print('OCR completed. Recognized Text: $recognizedText');
+      print('OCR completed. Recognized Text: $ocrText');
 
-      return recognizedText;
+      print("OCR Text before cleaning:\n$ocrText");
+
+      // Split the OCR text into lines
+      List<String> lines = ocrText.split('\n');
+
+      String targetLine = '';
+      // Iterate over each line to find the one with 25 digits after cleaning
+      for (String line in lines) {
+        String cleanedLine = line.replaceAll(RegExp(r'\D'), '');
+        if (cleanedLine.length == 25) {
+          targetLine = cleanedLine;
+          break;
+        }
+      }
+
+      // If not found, concatenate all lines and clean
+      if (targetLine.isEmpty) {
+        String concatenatedCleanedText =
+        ocrText.replaceAll(RegExp(r'\D'), '');
+        if (concatenatedCleanedText.length >= 25) {
+          // Take the last 25 digits (assuming MICR line is at the end)
+          targetLine = concatenatedCleanedText.substring(
+              concatenatedCleanedText.length - 25);
+        } else {
+          print('Error: Expected at least 25 digits, but found ${concatenatedCleanedText.length}.');
+          return null;
+        }
+      }
+
+      print("Cleaned MICR Line: $targetLine");
+
+      // Split the digits into the required parts
+      String chequeNo = targetLine.substring(0, 6);
+      String routingCode = targetLine.substring(6, 15);
+      String accountNo = targetLine.substring(15, 25);
+
+      String result = 'Cheque No: $chequeNo\nRouting Code: $routingCode\nAccount No: $accountNo';
+      if (isRotated) {
+        result += '\n(Note: Image was rotated 180 degrees to extract data)';
+      }
+
+      return result;
     } catch (e) {
-      print('Error in processImage: $e');
-      return 'Error during image processing: $e';
+      print('Error in extractMicrData: $e');
+      return null;
     }
   }
 
