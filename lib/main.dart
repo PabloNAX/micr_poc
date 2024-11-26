@@ -37,21 +37,21 @@ class _MicroOcrAppState extends State<MicroOcrApp> {
   late Future<void> _initializeControllerFuture;
   String recognizedText = '';
   XFile? imageFile;
-  File? processedImageFile; // Для отображения обработанного изображения
-  File? rotatedImageFile; // Для отображения изображения после поворота
+  File? processedImageFile; // To display the processed image
+  File? rotatedImageFile; // To display the rotated image
   bool isProcessing = false;
 
   @override
   void initState() {
     super.initState();
-    // Инициализация контроллера камеры
+    // Initialize the camera controller
     _controller = CameraController(
       widget.camera,
       ResolutionPreset.high,
     );
     _initializeControllerFuture = _controller.initialize();
 
-    // Копирование e13b.traineddata в папку tessdata
+    // Copy e13b.traineddata to the tessdata folder
     copyTrainedData();
   }
 
@@ -76,12 +76,12 @@ class _MicroOcrAppState extends State<MicroOcrApp> {
 
   @override
   void dispose() {
-    // Освобождение ресурсов контроллера при удалении виджета
+    // Release controller resources when the widget is removed
     _controller.dispose();
     super.dispose();
   }
 
-  // Метод сброса состояния
+  // Method to reset the state
   void resetState() {
     setState(() {
       recognizedText = '';
@@ -101,15 +101,15 @@ class _MicroOcrAppState extends State<MicroOcrApp> {
         rotatedImageFile = null;
       });
 
-      // Убедиться, что камера инициализирована
+      // Ensure the camera is initialized
       await _initializeControllerFuture;
 
-      // Захват изображения
+      // Capture the image
       final image = await _controller.takePicture();
       imageFile = image;
       print('Image captured: ${image.path}');
 
-      // Проверка существования файла изображения
+      // Check if the image file exists
       if (!await File(image.path).exists()) {
         print('Image file does not exist.');
         setState(() {
@@ -119,11 +119,53 @@ class _MicroOcrAppState extends State<MicroOcrApp> {
         return;
       }
 
-      // Обработка изображения
+      // Process the image
       String ocrText = await processImage(image);
 
+      print("OCR Text before cleaning:\n$ocrText");
+
+      // Split the OCR text into lines
+      List<String> lines = ocrText.split('\n');
+
+      String targetLine = '';
+      // Iterate over each line to find the one with 25 digits after cleaning
+      for (String line in lines) {
+        String cleanedLine = line.replaceAll(RegExp(r'\D'), '');
+        if (cleanedLine.length == 25) {
+          targetLine = cleanedLine;
+          break;
+        }
+      }
+
+      // If not found, concatenate all lines and clean
+      if (targetLine.isEmpty) {
+        String concatenatedCleanedText =
+        ocrText.replaceAll(RegExp(r'\D'), '');
+        if (concatenatedCleanedText.length >= 25) {
+          // Take the last 25 digits (assuming MICR line is at the end)
+          targetLine = concatenatedCleanedText.substring(
+              concatenatedCleanedText.length - 25);
+        } else {
+          setState(() {
+            recognizedText =
+            'Error: Expected at least 25 digits, but found ${concatenatedCleanedText.length}.';
+            isProcessing = false;
+          });
+          return;
+        }
+      }
+
+      print("Cleaned MICR Line: $targetLine");
+
+      // Split the digits into the required parts
+      String chequeNo = targetLine.substring(0, 6);
+      String routingCode = targetLine.substring(6, 15);
+      String accountNo = targetLine.substring(15, 25);
+
+      // Update the recognizedText to display the results
       setState(() {
-        recognizedText = ocrText;
+        recognizedText =
+        'Cheque No: $chequeNo\nRouting Code: $routingCode\nAccount No: $accountNo';
         isProcessing = false;
       });
     } catch (e) {
@@ -134,6 +176,7 @@ class _MicroOcrAppState extends State<MicroOcrApp> {
       });
     }
   }
+
 
   void adaptiveThreshold(img.Image image, {int blockSize = 15, double C = 10}) {
     int width = image.width;
@@ -168,20 +211,19 @@ class _MicroOcrAppState extends State<MicroOcrApp> {
       }
     }
 
-    // Возвращаем результат
+    // Return the result
     image
       ..data = result.data
       ..frames = result.frames;
   }
 
-
   Future<String> processImage(XFile image) async {
     try {
-      // Чтение байтов изображения
+      // Read the image bytes
       final bytes = await image.readAsBytes();
       print('Image bytes length: ${bytes.length}');
 
-      // Чтение данных EXIF для получения ориентации
+      // Read EXIF data to get orientation
       img.Image? capturedImage = img.decodeImage(bytes);
 
       if (capturedImage == null) {
@@ -190,13 +232,13 @@ class _MicroOcrAppState extends State<MicroOcrApp> {
       }
       print('Image decoded: ${capturedImage.width}x${capturedImage.height}');
 
-      // Поворот изображения, если оно в портретной ориентации
+      // Rotate the image if it's in portrait orientation
       if (capturedImage.width < capturedImage.height) {
         capturedImage = img.copyRotate(capturedImage, angle: -90);
         print('Rotated image by -90 degrees to make it landscape.');
       }
 
-      // Сохранение повернутого изображения для отображения
+      // Save the rotated image for display
       Directory tempDir = await getTemporaryDirectory();
       String tempRotatedPath = path.join(
         tempDir.path,
@@ -206,14 +248,14 @@ class _MicroOcrAppState extends State<MicroOcrApp> {
       await tempRotatedFile.writeAsBytes(img.encodePng(capturedImage));
       print('Rotated image saved: $tempRotatedPath');
 
-      // Отображение повернутого изображения
+      // Display the rotated image
       setState(() {
         rotatedImageFile = tempRotatedFile;
       });
 
-      // Теперь изображение должно быть правильно ориентировано.
+      // Now the image should be properly oriented.
 
-      // Кадрирование нижних 30% изображения
+      // Crop the bottom 30% of the image
       int cropHeight = (capturedImage.height * 0.30).toInt();
       int yOffset = capturedImage.height - cropHeight;
 
@@ -226,26 +268,23 @@ class _MicroOcrAppState extends State<MicroOcrApp> {
       );
       print('Image cropped: ${croppedImage.width}x${croppedImage.height}');
 
-      // Преобразование в градации серого
+      // Convert to grayscale
       img.Image grayscaleImage = img.grayscale(croppedImage);
 
-      // Применение гистограммной эквализации
-      // img.equalize(grayscaleImage);
-
-      // Улучшение контрастности
+      // Enhance contrast
       img.Image contrastEnhancedImage =
       img.adjustColor(grayscaleImage, contrast: 1.5);
 
-      // Применение размытия Гаусса для уменьшения шума
+      // Apply Gaussian blur to reduce noise
       img.gaussianBlur(contrastEnhancedImage, radius: 1);
 
-      // Применение адаптивного порогового преобразования
+      // Apply adaptive thresholding
       adaptiveThreshold(contrastEnhancedImage, blockSize: 15, C: 10);
 
-      // Использование обработанного изображения для OCR
+      // Use the processed image for OCR
       img.Image processedImage = contrastEnhancedImage;
 
-      // Сохранение обработанного изображения
+      // Save the processed image
       String tempPath = path.join(
         tempDir.path,
         'processed_image_${DateTime.now().millisecondsSinceEpoch}.png',
@@ -254,12 +293,12 @@ class _MicroOcrAppState extends State<MicroOcrApp> {
       await tempFile.writeAsBytes(img.encodePng(processedImage));
       print('Processed image saved: $tempPath');
 
-      // Отображение обработанного изображения
+      // Display the processed image
       setState(() {
         processedImageFile = tempFile;
       });
 
-      // Выполнение OCR
+      // Perform OCR
       print('Starting OCR...');
       String recognizedText = await FlutterTesseractOcr.extractText(
         tempPath,
@@ -277,8 +316,6 @@ class _MicroOcrAppState extends State<MicroOcrApp> {
     }
   }
 
-
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -288,20 +325,20 @@ class _MicroOcrAppState extends State<MicroOcrApp> {
       body: SingleChildScrollView(
         child: Column(
           children: [
-            // Предварительный просмотр камеры с наложением прямоугольника
+            // Camera preview with overlay rectangle
             Container(
-              height: 500, // Отрегулируйте высоту по необходимости
+              height: 500, // Adjust the height as needed
               child: FutureBuilder<void>(
                 future: _initializeControllerFuture,
                 builder: (context, snapshot) {
                   if (snapshot.connectionState == ConnectionState.done) {
-                    // Отображение предварительного просмотра камеры с наложением
+                    // Display the camera preview with overlay
                     return LayoutBuilder(
                       builder: (context, constraints) {
                         double overlayHeight =
-                            constraints.maxHeight * .9; // 90% от высоты превью
+                            constraints.maxHeight * .9; // 90% of preview height
                         double overlayWidth = overlayHeight /
-                            1.7; // Ширина на основе соотношения сторон
+                            1.7; // Width based on aspect ratio
                         double left =
                             (constraints.maxWidth - overlayWidth) / 2;
                         double top =
@@ -311,7 +348,7 @@ class _MicroOcrAppState extends State<MicroOcrApp> {
                           fit: StackFit.expand,
                           children: [
                             CameraPreview(_controller),
-                            // Прямоугольник для позиционирования
+                            // Rectangle for positioning
                             Positioned(
                               left: left,
                               top: top,
@@ -331,13 +368,13 @@ class _MicroOcrAppState extends State<MicroOcrApp> {
                       },
                     );
                   } else {
-                    // Индикатор загрузки
+                    // Loading indicator
                     return Center(child: CircularProgressIndicator());
                   }
                 },
               ),
             ),
-            // Отображение захваченного изображения
+            // Display the captured image
             if (imageFile != null)
               Column(
                 children: [
@@ -345,7 +382,7 @@ class _MicroOcrAppState extends State<MicroOcrApp> {
                   Image.file(File(imageFile!.path)),
                 ],
               ),
-            // Отображение повернутого изображения
+            // Display the rotated image
             if (rotatedImageFile != null)
               Column(
                 children: [
@@ -353,7 +390,7 @@ class _MicroOcrAppState extends State<MicroOcrApp> {
                   Image.file(rotatedImageFile!),
                 ],
               ),
-            // Отображение обработанного изображения
+            // Display the processed image
             if (processedImageFile != null)
               Column(
                 children: [
@@ -361,32 +398,32 @@ class _MicroOcrAppState extends State<MicroOcrApp> {
                   Image.file(processedImageFile!),
                 ],
               ),
-            // Индикатор обработки
+            // Processing indicator
             if (isProcessing)
               Padding(
                 padding: const EdgeInsets.all(8.0),
                 child: CircularProgressIndicator(),
               ),
-            // Отображение распознанного текста
+            // Display the recognized text
             if (!isProcessing && recognizedText.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.all(8.0),
                 child: Text(
-                  'Recognized MICR Line:\n$recognizedText',
+                  recognizedText,
                   style: TextStyle(fontSize: 16),
                 ),
               ),
-            // Кнопки управления
+            // Control buttons
             Padding(
               padding: const EdgeInsets.all(8.0),
               child: Column(
                 children: [
-                  // Кнопка захвата и обработки
+                  // Capture and process button
                   ElevatedButton(
                     onPressed: isProcessing ? null : captureAndProcessImage,
                     child: Text('Capture and Process'),
                   ),
-                  // Кнопка сброса (отображается только после обработки)
+                  // Reset button (only displayed after processing)
                   if (!isProcessing &&
                       (imageFile != null || recognizedText.isNotEmpty))
                     ElevatedButton(
