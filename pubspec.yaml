@@ -69,6 +69,7 @@ flutter:
     - assets/mcr.traineddata
     - assets/eng.traineddata
     - assets/e13b.traineddata
+    - assets/tessdata/
     - assets/tessdata_config.json
 
   # An image asset can refer to one or more resolution-specific "variants", see
