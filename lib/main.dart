@@ -44,10 +44,12 @@ class _MicroOcrAppState extends State<MicroOcrApp> {
   @override
   void initState() {
     super.initState();
+    print('sdsd');
     // Initialize the camera controller
     _controller = CameraController(
       widget.camera,
-      ResolutionPreset.medium,
+      ResolutionPreset.high,
+        enableAudio: false,
     );
     _initializeControllerFuture = _controller.initialize();
 
@@ -346,7 +348,8 @@ class _MicroOcrAppState extends State<MicroOcrApp> {
         processedPath,
         language: 'e13b',
         args: {
-          'tessedit_char_whitelist': '0123456789ABCD',
+          // 'tessedit_char_whitelist': '0123456789⑆⑇⑈',
+          'tessedit_char_whitelist': '0123456789',
         },
       );
 
@@ -410,7 +413,7 @@ class _MicroOcrAppState extends State<MicroOcrApp> {
           children: [
             // Camera preview with overlay rectangle
             Container(
-              height: 500, // Adjust the height as needed
+              height: 700, // Adjust the height as needed
               child: FutureBuilder<void>(
                 future: _initializeControllerFuture,
                 builder: (context, snapshot) {
