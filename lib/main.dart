@@ -349,52 +349,51 @@ class _MicroOcrAppState extends State<MicroOcrApp> {
         language: 'e13b',
         args: {
           // 'tessedit_char_whitelist': '0123456789⑆⑇⑈',
-          'tessedit_char_whitelist': '0123456789',
+          'tessedit_char_whitelist': '0123456789\u2466\u2467\u2468',
+          // 'tessedit_char_whitelist': '0123456789',
         },
       );
 
-      print('OCR completed. Recognized Text: $ocrText');
-      
       print("OCR Text before cleaning:\n$ocrText");
 
-      // Split the OCR text into lines
+      // Разбиваем на строки и обрабатываем каждую
       List<String> lines = ocrText.split('\n');
+      // Обновленное регулярное выражение, которое ищет паттерн C...A...AC...C в любом месте строки
+      RegExp micrPattern = RegExp(r'C(\d+)A(\d+)AC(\d+)C');
 
-      String targetLine = '';
-      // Iterate over each line to find the one with 25 digits after cleaning
       for (String line in lines) {
-        String cleanedLine = line.replaceAll(RegExp(r'\D'), '');
-        if (cleanedLine.length == 25) {
-          targetLine = cleanedLine;
-          break;
+        // Убираем пробелы из строки
+        String noSpaces = line.trim().replaceAll(' ', '');
+        print("Processing line: $noSpaces");
+        
+        Match? match = micrPattern.firstMatch(noSpaces);
+        
+        if (match != null) {
+          // Объединяем все цифры
+          String targetLine = '${match.group(1)}${match.group(2)}${match.group(3)}';
+          print("MICR components found in line:");
+          print(" - First part (after initial C): ${match.group(1)}");
+          print(" - Second part (between A and AC): ${match.group(2)}");
+          print(" - Third part (before final C): ${match.group(3)}");
+          print("Combined digits: $targetLine");
+
+          if (targetLine.length == 25) {
+            // Разбиваем на части
+            String chequeNo = targetLine.substring(0, 6);
+            String routingCode = targetLine.substring(6, 15);
+            String accountNo = targetLine.substring(15, 25);
+
+            String result = 'Cheque No: $chequeNo\nRouting Code: $routingCode\nAccount No: $accountNo';
+            if (isRotated) {
+              result += '\n(Note: Image was rotated 180 degrees to extract data)';
+            }
+            return result;
+          }
         }
       }
 
-      // If not found, concatenate all lines and clean
-      if (targetLine.isEmpty) {
-        String concatenatedCleanedText = ocrText.replaceAll(RegExp(r'\D'), '');
-        if (concatenatedCleanedText.length >= 25) {
-          targetLine = concatenatedCleanedText.substring(
-              concatenatedCleanedText.length - 25);
-        } else {
-          print('Error: Expected at least 25 digits, but found ${concatenatedCleanedText.length}.');
-          return null;
-        }
-      }
-
-      print("Cleaned MICR Line: $targetLine");
-
-      // Split the digits into the required parts
-      String chequeNo = targetLine.substring(0, 6);
-      String routingCode = targetLine.substring(6, 15);
-      String accountNo = targetLine.substring(15, 25);
-
-      String result = 'Cheque No: $chequeNo\nRouting Code: $routingCode\nAccount No: $accountNo';
-      if (isRotated) {
-        result += '\n(Note: Image was rotated 180 degrees to extract data)';
-      }
-
-      return result;
+      print('Error: Invalid MICR format or not 25 digits');
+      return null;
 
     } catch (e) {
       print('Error in extractMicrData: $e');
