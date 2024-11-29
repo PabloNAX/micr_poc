@@ -255,9 +255,9 @@ class _MicroOcrAppState extends State<MicroOcrApp> {
 
       // STEP 1: Calculate frame dimensions using the same logic as in UI
       double frameWidth = capturedImage.width * 0.9; // Start with 90% of width
-      double frameHeight = frameWidth * (1 / frameAspectRatio); // Инвертируем соотношение
+      double frameHeight = frameWidth * (1 / frameAspectRatio); // inverting
       
-      // Если высота слишком большая, пересчитываем от высоты
+      // if height is to big recounting from height
       if (frameHeight > capturedImage.height * 0.9) {
         frameHeight = capturedImage.height * 0.9;
         frameWidth = frameHeight * frameAspectRatio;
@@ -349,27 +349,27 @@ class _MicroOcrAppState extends State<MicroOcrApp> {
         language: 'e13b',
         args: {
           // 'tessedit_char_whitelist': '0123456789⑆⑇⑈',
-          'tessedit_char_whitelist': '0123456789\u2466\u2467\u2468',
+          'tessedit_char_whitelist': '0123456789ABCD',
           // 'tessedit_char_whitelist': '0123456789',
         },
       );
 
       print("OCR Text before cleaning:\n$ocrText");
 
-      // Разбиваем на строки и обрабатываем каждую
+      // splitting into strings
       List<String> lines = ocrText.split('\n');
-      // Обновленное регулярное выражение, которое ищет паттерн C...A...AC...C в любом месте строки
+      // regexp for pattern C...A...AC...C
       RegExp micrPattern = RegExp(r'C(\d+)A(\d+)AC(\d+)C');
 
       for (String line in lines) {
-        // Убираем пробелы из строки
+        // removing spaces
         String noSpaces = line.trim().replaceAll(' ', '');
         print("Processing line: $noSpaces");
         
         Match? match = micrPattern.firstMatch(noSpaces);
         
         if (match != null) {
-          // Объединяем все цифры
+          // combining digits
           String targetLine = '${match.group(1)}${match.group(2)}${match.group(3)}';
           print("MICR components found in line:");
           print(" - First part (after initial C): ${match.group(1)}");
@@ -378,7 +378,7 @@ class _MicroOcrAppState extends State<MicroOcrApp> {
           print("Combined digits: $targetLine");
 
           if (targetLine.length == 25) {
-            // Разбиваем на части
+            // splitting apart
             String chequeNo = targetLine.substring(0, 6);
             String routingCode = targetLine.substring(6, 15);
             String accountNo = targetLine.substring(15, 25);
@@ -412,7 +412,7 @@ class _MicroOcrAppState extends State<MicroOcrApp> {
           children: [
             // Camera preview with overlay rectangle
             Container(
-              height: 700, // Adjust the height as needed
+              height: MediaQuery.of(context).size.height * 0.8, // 60% высоты экрана
               child: FutureBuilder<void>(
                 future: _initializeControllerFuture,
                 builder: (context, snapshot) {
